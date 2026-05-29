@@ -2,6 +2,8 @@
 
 AI-powered, highly customizable health & fitness coaching for **iOS, Android & Web** — one Flutter codebase. Practical like WHOOP: not just an exercise list, but a coach that reads your real health data, your meals, and your goals.
 
+**🌐 Live (web):** https://mujtabatariq18.github.io/fitme/ — auto-deploys from `main` via GitHub Actions. Works in mobile browsers too.
+
 ![brand](assets/brand/logo_a.png)
 
 ## Vision
