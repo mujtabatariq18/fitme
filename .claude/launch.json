@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fitme-web",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port", "8090", "--web-hostname", "127.0.0.1", "--release"],
+      "port": 8090
+    }
+  ]
+}
