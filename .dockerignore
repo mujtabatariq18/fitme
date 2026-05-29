@@ -1,0 +1,17 @@
+# Keep the build context small & reproducible — never ship host artifacts.
+.git
+.github
+.dart_tool
+build
+.idea
+.vscode
+*.iml
+android/.gradle
+ios/Pods
+ios/.symlinks
+windows
+linux
+macos
+test
+.claude
+**/.DS_Store

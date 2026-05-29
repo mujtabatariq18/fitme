@@ -46,21 +46,11 @@ class WelcomeScreen extends StatelessWidget {
                 ..._props.map((p) => _PropRow(emoji: p.$1, title: p.$2, sub: p.$3)),
                 const Spacer(flex: 2),
                 PrimaryButton(
-                  label: 'Get started',
+                  label: 'Set up my plan',
                   icon: Icons.arrow_forward_rounded,
                   onPressed: () => context.push('/onboarding'),
                 ),
-                const SizedBox(height: Insets.md),
-                TextButton(
-                  onPressed: () => context.go('/home'),
-                  child: Text(
-                    'I already have an account',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: AppColors.pink,
-                        ),
-                  ),
-                ),
-                const SizedBox(height: Insets.sm),
+                const SizedBox(height: Insets.lg),
               ],
             ),
           ),

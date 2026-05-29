@@ -4,6 +4,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/fit_card.dart';
 import '../application/ai_config_controller.dart';
+import '../domain/ai_model_catalog.dart';
 import '../domain/ai_provider_config.dart';
 
 /// Admin panel: configure AI providers (multiple vendors / keys) and route
@@ -165,8 +166,7 @@ class _ProviderCard extends StatelessWidget {
             _field(context, 'API key', provider.apiKey, obscure: true,
                 (v) => ctrl.updateProvider(provider.copyWith(apiKey: v))),
             const SizedBox(height: Insets.sm),
-            _field(context, 'Model', provider.model,
-                (v) => ctrl.updateProvider(provider.copyWith(model: v))),
+            _modelPicker(context),
             const SizedBox(height: Insets.sm),
             _field(context, 'Base URL', provider.baseUrl,
                 (v) => ctrl.updateProvider(provider.copyWith(baseUrl: v))),
@@ -191,6 +191,61 @@ class _ProviderCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(Radii.sm),
         ),
       ),
+    );
+  }
+
+  /// Model selector — dropdown from the vendor's catalog (with vision badges),
+  /// or a free-text field for custom/OpenAI-compatible endpoints.
+  Widget _modelPicker(BuildContext context) {
+    final catalog = AiModelCatalog.forVendor(provider.vendor);
+    if (catalog.isEmpty) {
+      return _field(context, 'Model', provider.model,
+          (v) => ctrl.updateProvider(provider.copyWith(model: v)));
+    }
+    final ids = catalog.map((m) => m.id).toList();
+    final value = ids.contains(provider.model) ? provider.model : null;
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: 'Model',
+        isDense: true,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(Radii.sm),
+        ),
+      ),
+      hint: const Text('Select a model'),
+      items: [
+        for (final m in catalog)
+          DropdownMenuItem(
+            value: m.id,
+            child: Row(
+              children: [
+                Flexible(
+                    child: Text(m.name, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 6),
+                if (m.vision)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.blueTint,
+                      borderRadius: BorderRadius.circular(Radii.pill),
+                    ),
+                    child: const Text('vision',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: AppColors.blueDark,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                Text('  ${m.contextK}k',
+                    style: const TextStyle(fontSize: 11, color: AppColors.ink300)),
+              ],
+            ),
+          ),
+      ],
+      onChanged: (v) {
+        if (v != null) ctrl.updateProvider(provider.copyWith(model: v));
+      },
     );
   }
 }

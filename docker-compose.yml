@@ -1,0 +1,8 @@
+services:
+  fitme-web:
+    build: .
+    image: fitme-web:latest
+    container_name: fitme-web
+    ports:
+      - "8080:80"
+    restart: unless-stopped

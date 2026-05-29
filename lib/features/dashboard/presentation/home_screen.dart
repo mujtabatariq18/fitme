@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/blob_background.dart';
 import '../../../core/widgets/fit_card.dart';
 import '../../../core/widgets/metric_ring.dart';
+import '../../nutrition/application/food_log_controller.dart';
 import '../../onboarding/application/profile_controller.dart';
 import '../../onboarding/domain/user_profile.dart';
 
@@ -18,8 +19,8 @@ class HomeScreen extends ConsumerWidget {
     final p = ref.watch(profileProvider);
     final fit = context.fit;
     final target = p.dailyCalorieTarget ?? 2000;
-    // Placeholder "consumed so far" until food logging lands.
-    const consumed = 1180;
+    ref.watch(foodLogProvider); // rebuild when the log changes
+    final consumed = ref.read(foodLogProvider.notifier).totalKcal;
     final macros = p.macros;
 
     return Scaffold(
@@ -121,9 +122,9 @@ class HomeScreen extends ConsumerWidget {
                   Expanded(
                     child: _ActionCard(
                       icon: Icons.camera_alt_rounded,
-                      label: 'Scan food',
+                      label: 'Log food',
                       color: AppColors.pink,
-                      onTap: () => _soon(context, 'Food scanning'),
+                      onTap: () => context.push('/food'),
                     ),
                   ),
                   const SizedBox(width: Insets.md),
@@ -132,16 +133,16 @@ class HomeScreen extends ConsumerWidget {
                       icon: Icons.fitness_center_rounded,
                       label: 'Workout',
                       color: AppColors.deepMagenta,
-                      onTap: () => _soon(context, 'Workouts'),
+                      onTap: () => context.push('/workouts'),
                     ),
                   ),
                   const SizedBox(width: Insets.md),
                   Expanded(
                     child: _ActionCard(
                       icon: Icons.monitor_weight_rounded,
-                      label: 'Add weight',
+                      label: 'Progress',
                       color: AppColors.blue,
-                      onTap: () => _soon(context, 'Weight logging'),
+                      onTap: () => context.push('/progress'),
                     ),
                   ),
                 ],
@@ -183,11 +184,6 @@ class HomeScreen extends ConsumerWidget {
         Gender.nonBinary => Icons.person_rounded,
       };
 
-  void _soon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature is coming in the next phase')),
-    );
-  }
 }
 
 class _Stat extends StatelessWidget {
