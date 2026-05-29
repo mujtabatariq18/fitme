@@ -85,7 +85,7 @@ The admin panel is in-app: log in as admin → Settings → AI Settings
 The Windows JDK has an AF_UNIX/loopback bug that breaks the local Gradle daemon,
 so the APK is built inside a Linux Flutter container, then installed via adb:
 ```bash
-docker run --rm -v "E:/FItMe:/app" -v fitme_gradle:/root/.gradle -w /app \
+docker run --rm -v "E:/FItMe:/app" -v fitme_gradle:/root/.gradle -v fitme_android:/root/.android -w /app \
   ghcr.io/cirruslabs/flutter:3.44.0 \
   bash -lc "git config --global --add safe.directory /app && flutter pub get && flutter build apk --debug"
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
@@ -120,10 +120,37 @@ persistence. Live on web.
 - Admin AI panel: OpenRouter (+per-vendor) model picker with vision badges &
   context sizes; vision-only tasks restricted to vision models.
 
-## Roadmap
+**Phase 3 — Live AI + remaining modules (done):**
+- **Live AI client** — multi-vendor HTTP (OpenAI-compatible / Anthropic / Gemini)
+  with vision. The coach chat and the food-photo scan call the bound provider
+  (offline fallback if none). Keys come from the admin AI panel.
+- **Guided workout player** — gender-aware animated avatar, set/rest timers,
+  progress, completion summary.
+- **Reminders** — local notifications for meals / workout / water + settings.
+- **Health sync** — Health Connect / HealthKit service + dashboard card.
+- **Supabase backend layer** — guarded init, `supabase/schema.sql` (RLS),
+  `supabase/functions/ai-proxy` edge function, `docs/BACKEND.md`. Activates with
+  `--dart-define SUPABASE_URL=… SUPABASE_ANON_KEY=…`.
 
-- **Phase 3 — Backend:** Supabase init, real auth, profile/log sync, AI keys in edge functions.
-- **Phase 4 — AI vision live:** camera → bound vision model → calorie/macro + body analysis.
-- **Phase 5 — Avatars:** gender-aware animated exercise guidance + guided workout player.
-- **Phase 6 — Health sync:** `health` plugin (Apple Health / Google Fit / Samsung).
-- **Phase 7 — Proactive coaching:** stat monitoring + push notifications (FCM/APNs).
+## Testing in Android Studio (Windows)
+
+> **Heads-up:** this machine's JDK hits a Windows AF_UNIX/loopback bug
+> (`java.io.IOException: Unable to establish loopback connection`). It affects
+> **any** local Gradle invocation — including Android Studio's Gradle sync —
+> not just the Flutter CLI. If AS fails to sync/build with that error, try, in
+> order:
+> 1. **Antivirus/Defender exclusion** for the project folder, `%USERPROFILE%\.gradle`, and the JDK folder (security software intercepting AF_UNIX loopback is the most common cause).
+> 2. `netsh winsock reset` in an **admin** PowerShell, then reboot (repairs a corrupted Winsock that breaks AF_UNIX loopback).
+> 3. Android Studio → Settings → Build → Build Tools → Gradle → set **Gradle JDK** to the embedded **jbr**.
+>
+> If Gradle still won't run locally, use the container-built APK:
+> `docker run --rm -v "E:/FItMe:/app" -v fitme_gradle:/root/.gradle -v fitme_android:/root/.android -w /app ghcr.io/cirruslabs/flutter:3.44.0 bash -lc "flutter pub get && flutter build apk --debug"`
+> then in Android Studio just select the running emulator and **Run** the
+> installed app, or `adb install -r build/app/outputs/flutter-apk/app-debug.apk`.
+
+## Roadmap (next)
+
+- Wire profile/log **sync to Supabase** once a project is connected.
+- **Body-area progress photos** → vision analysis & comparison over time.
+- **FCM/APNs** push (server-driven) on top of the local reminders.
+- Real **signing config** + Play/App Store submission.
