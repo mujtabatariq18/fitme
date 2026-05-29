@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/primary_button.dart';
 import '../domain/exercise.dart';
-import 'exercise_avatar.dart';
+import 'exercise_demo.dart';
 
-/// Full-screen guided workout player that steps through each exercise in a
-/// [WorkoutRoutine], displays an animated avatar, manages set/rest countdowns,
-/// and shows a completion summary on finish.
+enum _Phase { go, rest, done }
+
+/// Gamified workout session. Once started it only asks "is this set done?",
+/// drives a big progress meter, and awards XP + combo for completed sets.
 class WorkoutPlayerScreen extends StatefulWidget {
   const WorkoutPlayerScreen({
     super.key,
@@ -25,253 +26,258 @@ class WorkoutPlayerScreen extends StatefulWidget {
   State<WorkoutPlayerScreen> createState() => _WorkoutPlayerScreenState();
 }
 
-// ── Player phases ─────────────────────────────────────────────────────────────
-enum _Phase { exercise, rest, done }
-
 class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
-  // Navigation state
-  int _exerciseIndex = 0;
-  int _currentSet = 1; // 1-based
-  _Phase _phase = _Phase.exercise;
-  bool _paused = false;
+  int _exIndex = 0;
+  int _set = 1;
+  int _completed = 0;
+  int _skipped = 0;
+  int _score = 0;
+  int _combo = 0;
+  _Phase _phase = _Phase.go;
 
-  // Countdown state (timed exercises & rest)
-  Timer? _timer;
-  int _countdown = 0;
+  Timer? _restTimer;
+  int _restLeft = 0;
+  String _flash = '';
 
-  // Completion tracking
-  int _totalSetsCompleted = 0;
+  late final int _totalSets =
+      widget.routine.exercises.fold(0, (s, e) => s + e.sets);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  List<Exercise> get _exercises => widget.routine.exercises;
-  Exercise get _current => _exercises[_exerciseIndex];
-
-  /// Total sets across the whole routine for the progress bar.
-  int get _totalSets =>
-      _exercises.fold(0, (sum, e) => sum + e.sets);
-
-  @override
-  void initState() {
-    super.initState();
-    _startPhase();
-  }
+  Exercise get _ex => widget.routine.exercises[_exIndex];
+  double get _progress => _totalSets == 0 ? 0 : _completed / _totalSets;
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _restTimer?.cancel();
     super.dispose();
   }
 
-  // ── Phase management ───────────────────────────────────────────────────────
-  void _startPhase() {
-    _timer?.cancel();
-    if (_phase == _Phase.exercise && _current.isTimed) {
-      _countdown = _current.durationSec!;
-      _startCountdown(onComplete: _onExerciseCountdownDone);
-    } else if (_phase == _Phase.rest) {
-      _countdown = _current.restSec;
-      _startCountdown(onComplete: _onRestDone);
-    }
-    // rep-based exercises wait for user tap
+  bool get _isLastSetOfAll =>
+      _exIndex == widget.routine.exercises.length - 1 && _set == _ex.sets;
+
+  void _setDone() {
+    _combo++;
+    final gained = 10 + (_combo >= 3 ? 5 : 0) + (_ex.isTimed ? 2 : 0);
+    setState(() {
+      _completed++;
+      _score += gained;
+      _flash = '+$gained XP${_combo >= 3 ? '  🔥x$_combo' : ''}';
+    });
+    _afterSet();
   }
 
-  void _startCountdown({required VoidCallback onComplete}) {
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (_paused) return;
-      if (_countdown <= 1) {
+  void _skipSet() {
+    setState(() {
+      _completed++;
+      _skipped++;
+      _combo = 0;
+      _flash = 'skipped';
+    });
+    _afterSet();
+  }
+
+  void _afterSet() {
+    final restSec = _ex.restSec.clamp(10, 90);
+    if (_isLastSetOfAll) {
+      setState(() => _phase = _Phase.done);
+      return;
+    }
+    // Advance pointers to the next set / exercise.
+    if (_set < _ex.sets) {
+      _set++;
+    } else {
+      _exIndex++;
+      _set = 1;
+    }
+    _startRest(restSec);
+  }
+
+  void _startRest(int seconds) {
+    _restTimer?.cancel();
+    setState(() {
+      _phase = _Phase.rest;
+      _restLeft = seconds;
+    });
+    _restTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      if (_restLeft <= 1) {
         t.cancel();
-        onComplete();
+        setState(() => _phase = _Phase.go);
       } else {
-        setState(() => _countdown--);
+        setState(() => _restLeft--);
       }
     });
   }
 
-  void _onExerciseCountdownDone() {
-    setState(() {});
-    _advanceSet();
+  void _skipRest() {
+    _restTimer?.cancel();
+    setState(() => _phase = _Phase.go);
   }
 
-  void _onRestDone() {
-    setState(() => _phase = _Phase.exercise);
-    _startPhase();
-  }
-
-  /// Called after a set is "done" (either by countdown or tap).
-  void _advanceSet() {
-    _timer?.cancel();
-    _totalSetsCompleted++;
-
-    if (_currentSet < _current.sets) {
-      // More sets for this exercise → rest
-      setState(() {
-        _currentSet++;
-        _phase = _Phase.rest;
-      });
-      _startPhase();
-    } else {
-      // All sets done → move to next exercise or finish
-      if (_exerciseIndex < _exercises.length - 1) {
-        setState(() {
-          _exerciseIndex++;
-          _currentSet = 1;
-          _phase = _Phase.rest; // brief rest between exercises too
-          _countdown = _current.restSec; // now _current = new exercise
-        });
-        _startPhase();
-      } else {
-        setState(() => _phase = _Phase.done);
-      }
-    }
-  }
-
-  void _togglePause() {
-    setState(() => _paused = !_paused);
-  }
-
-  void _skip() {
-    _timer?.cancel();
-    if (_phase == _Phase.rest) {
-      _onRestDone();
-    } else {
-      _advanceSet();
-    }
-  }
-
-  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    if (_phase == _Phase.done) {
-      return _DoneScreen(
-        routine: widget.routine,
-        setsCompleted: _totalSetsCompleted,
-      );
-    }
-
-    final theme = Theme.of(context);
-    final isResting = _phase == _Phase.rest;
-
     return Scaffold(
-      backgroundColor: AppColors.night0,
+      backgroundColor: context.fit.background,
       body: SafeArea(
-        child: Column(
-          children: [
-            _TopBar(
-              routineName: widget.routine.name,
-              onClose: () => Navigator.of(context).pop(),
-            ),
-            _ProgressBar(
-              completed: _totalSetsCompleted,
-              total: _totalSets,
-            ),
-            const SizedBox(height: Insets.lg),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: Insets.screenH),
-                child: Column(
-                  children: [
-                    if (isResting)
-                      _RestCard(countdown: _countdown)
-                    else ...[
-                      // Avatar
-                      ExerciseAvatar(
-                        isMale: widget.isMale,
-                        size: 200,
-                        animating: !_paused,
-                      ),
-                      const SizedBox(height: Insets.lg),
-                      // Exercise emoji + name
-                      Text(
-                        _current.emoji,
-                        style: const TextStyle(fontSize: 40),
-                      ),
-                      const SizedBox(height: Insets.sm),
-                      Text(
-                        _current.name,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          color: AppColors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: Insets.xs),
-                      // Set counter
-                      _SetBadge(
-                        current: _currentSet,
-                        total: _current.sets,
-                        volumeLabel: _current.volumeLabel,
-                      ),
-                      const SizedBox(height: Insets.xl),
-                      // Timed countdown OR rep indicator
-                      if (_current.isTimed)
-                        _CircularCountdown(
-                          countdown: _countdown,
-                          total: _current.durationSec!,
-                        )
-                      else
-                        _RepIndicator(reps: _current.reps),
-                      const SizedBox(height: Insets.xxl),
-                      // Instructions
-                      _InstructionCard(exercise: _current),
-                    ],
-                    const SizedBox(height: Insets.xxl),
-                  ],
-                ),
+        child: _phase == _Phase.done
+            ? _Summary(
+                routine: widget.routine,
+                score: _score,
+                completed: _completed,
+                skipped: _skipped,
+                onFinish: () => Navigator.of(context).pop(),
+              )
+            : Column(
+                children: [
+                  _Header(
+                    title: widget.routine.name,
+                    score: _score,
+                    onClose: () => Navigator.of(context).maybePop(),
+                  ),
+                  _Meter(
+                      progress: _progress,
+                      completed: _completed,
+                      total: _totalSets),
+                  Expanded(
+                    child: _phase == _Phase.go ? _buildGo() : _buildRest(),
+                  ),
+                ],
               ),
+      ),
+    );
+  }
+
+  Widget _buildGo() {
+    final e = _ex;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Insets.screenH),
+      child: Column(
+        children: [
+          const Spacer(),
+          ExerciseDemo(
+              exerciseName: e.name, isMale: widget.isMale, size: 260),
+          const SizedBox(height: Insets.lg),
+          Text(e.name,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: Insets.xs),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: Insets.lg, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.pinkTint,
+              borderRadius: BorderRadius.circular(Radii.pill),
             ),
-            // Controls
-            _ControlBar(
-              phase: _phase,
-              paused: _paused,
-              isTimed: _phase == _Phase.exercise && _current.isTimed,
-              onPause: _togglePause,
-              onSkip: _skip,
-              onDoneSet: (_phase == _Phase.exercise && !_current.isTimed)
-                  ? _advanceSet
-                  : null,
+            child: Text(
+              'Set $_set of ${e.sets}  ·  ${e.isTimed ? "hold ${e.durationSec}s" : "${e.reps} reps"}',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: AppColors.deepMagenta),
             ),
-            const SizedBox(height: Insets.lg),
+          ),
+          if (_flash.isNotEmpty) ...[
+            const SizedBox(height: Insets.sm),
+            Text(_flash,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: AppColors.success)),
           ],
-        ),
+          const Spacer(),
+          PrimaryButton(
+            label: 'Set done',
+            icon: Icons.check_rounded,
+            onPressed: _setDone,
+          ),
+          TextButton(
+            onPressed: _skipSet,
+            child: Text('Skip set',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: context.fit.textTertiary)),
+          ),
+          const SizedBox(height: Insets.sm),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRest() {
+    final next = _ex;
+    final restBase = _ex.restSec.clamp(10, 90);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Insets.screenH),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text('REST',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppColors.blue, letterSpacing: 2)),
+          const SizedBox(height: Insets.lg),
+          SizedBox(
+            width: 180,
+            height: 180,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 180,
+                  height: 180,
+                  child: CircularProgressIndicator(
+                    value: restBase == 0 ? 0 : _restLeft / restBase,
+                    strokeWidth: 10,
+                    backgroundColor: AppColors.blueTint,
+                    valueColor: const AlwaysStoppedAnimation(AppColors.blue),
+                  ),
+                ),
+                Text('$_restLeft',
+                    style: Theme.of(context).textTheme.displayLarge),
+              ],
+            ),
+          ),
+          const SizedBox(height: Insets.xl),
+          Text('Up next', style: Theme.of(context).textTheme.labelMedium),
+          Text('${next.name} · Set $_set of ${next.sets}',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: Insets.xl),
+          SecondaryButton(label: 'Skip rest', onPressed: _skipRest),
+        ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-widgets
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.routineName, required this.onClose});
-
-  final String routineName;
+class _Header extends StatelessWidget {
+  const _Header(
+      {required this.title, required this.score, required this.onClose});
+  final String title;
+  final int score;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(horizontal: Insets.lg, vertical: Insets.md),
+      padding: const EdgeInsets.fromLTRB(Insets.sm, Insets.sm, Insets.lg, 0),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: onClose,
-            child: const Icon(Icons.close_rounded,
-                color: AppColors.ink300, size: 26),
-          ),
-          const SizedBox(width: Insets.md),
+          IconButton(
+              onPressed: onClose, icon: const Icon(Icons.close_rounded)),
           Expanded(
-            child: Text(
-              routineName,
-              style: const TextStyle(
-                color: AppColors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge),
+          ),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: Insets.md, vertical: 6),
+            decoration: BoxDecoration(
+              gradient: AppGradients.brand,
+              borderRadius: BorderRadius.circular(Radii.pill),
             ),
+            child: Text('⭐ $score XP',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800)),
           ),
         ],
       ),
@@ -279,558 +285,136 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.completed, required this.total});
-
+/// The progress meter — the spine of the gamified session.
+class _Meter extends StatelessWidget {
+  const _Meter(
+      {required this.progress, required this.completed, required this.total});
+  final double progress;
   final int completed;
   final int total;
 
   @override
   Widget build(BuildContext context) {
-    final progress = total == 0 ? 0.0 : (completed / total).clamp(0.0, 1.0);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: Insets.screenH),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(Radii.pill),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 6,
-              backgroundColor: AppColors.night3,
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(AppColors.pink),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '$completed / $total sets',
-            style: const TextStyle(
-              color: AppColors.ink300,
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SetBadge extends StatelessWidget {
-  const _SetBadge({
-    required this.current,
-    required this.total,
-    required this.volumeLabel,
-  });
-
-  final int current;
-  final int total;
-  final String volumeLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: Insets.lg, vertical: Insets.xs),
-          decoration: BoxDecoration(
-            gradient: AppGradients.brand,
-            borderRadius: BorderRadius.circular(Radii.pill),
-          ),
-          child: Text(
-            'Set $current / $total',
-            style: const TextStyle(
-              color: AppColors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-            ),
-          ),
-        ),
-        const SizedBox(width: Insets.md),
-        Text(
-          volumeLabel,
-          style: const TextStyle(
-            color: AppColors.ink300,
-            fontSize: 14,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _CircularCountdown extends StatelessWidget {
-  const _CircularCountdown({required this.countdown, required this.total});
-
-  final int countdown;
-  final int total;
-
-  @override
-  Widget build(BuildContext context) {
-    final progress = total == 0 ? 0.0 : (countdown / total).clamp(0.0, 1.0);
-    return SizedBox(
-      width: 140,
-      height: 140,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          SizedBox.expand(
-            child: CircularProgressIndicator(
-              value: progress,
-              strokeWidth: 10,
-              backgroundColor: AppColors.night3,
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(AppColors.pink),
-            ),
-          ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$countdown',
-                style: const TextStyle(
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 40,
-                ),
-              ),
-              const Text(
-                's',
-                style: TextStyle(
-                  color: AppColors.ink300,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RepIndicator extends StatelessWidget {
-  const _RepIndicator({required this.reps});
-
-  final int reps;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          '$reps',
-          style: const TextStyle(
-            color: AppColors.white,
-            fontWeight: FontWeight.w800,
-            fontSize: 64,
-          ),
-        ),
-        const Text(
-          'REPS',
-          style: TextStyle(
-            color: AppColors.ink300,
-            fontWeight: FontWeight.w600,
-            fontSize: 16,
-            letterSpacing: 2,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _RestCard extends StatelessWidget {
-  const _RestCard({required this.countdown});
-
-  final int countdown;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const SizedBox(height: Insets.huge),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(Insets.xxl),
-          decoration: BoxDecoration(
-            color: AppColors.night2,
-            borderRadius: Radii.cardRadius,
-            border: Border.all(color: AppColors.night3),
-          ),
-          child: Column(
-            children: [
-              const Icon(Icons.self_improvement_rounded,
-                  color: AppColors.pink, size: 48),
-              const SizedBox(height: Insets.lg),
-              const Text(
-                'REST',
-                style: TextStyle(
-                  color: AppColors.ink300,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 3,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: Insets.sm),
-              Text(
-                '$countdown',
-                style: const TextStyle(
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 72,
-                ),
-              ),
-              const Text(
-                'seconds',
-                style: TextStyle(color: AppColors.ink300, fontSize: 14),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _InstructionCard extends StatelessWidget {
-  const _InstructionCard({required this.exercise});
-
-  final Exercise exercise;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(Insets.lg),
-      decoration: BoxDecoration(
-        color: AppColors.night2,
-        borderRadius: Radii.cardRadius,
-        border: Border.all(color: AppColors.night3),
-      ),
+      padding: const EdgeInsets.fromLTRB(
+          Insets.screenH, Insets.sm, Insets.screenH, Insets.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Instructions',
-            style: TextStyle(
-              color: AppColors.pink,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-              letterSpacing: 1,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('$completed / $total sets',
+                  style: Theme.of(context).textTheme.labelLarge),
+              Text('${(progress * 100).round()}%',
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelLarge
+                      ?.copyWith(color: AppColors.pink)),
+            ],
           ),
-          const SizedBox(height: Insets.sm),
-          Text(
-            exercise.instructions.isNotEmpty
-                ? exercise.instructions
-                : 'Perform the exercise with controlled form.',
-            style: const TextStyle(
-              color: AppColors.ink300,
-              fontSize: 14,
-              height: 1.5,
-            ),
-          ),
-          if (exercise.tips.isNotEmpty) ...[
-            const SizedBox(height: Insets.md),
-            const Text(
-              'Tips',
-              style: TextStyle(
-                color: AppColors.pinkBright,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: Insets.xs),
-            ...exercise.tips.map(
-              (tip) => Padding(
-                padding: const EdgeInsets.only(bottom: Insets.xs),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('• ',
-                        style: TextStyle(
-                            color: AppColors.pink, fontWeight: FontWeight.w700)),
-                    Expanded(
-                      child: Text(
-                        tip,
-                        style: const TextStyle(
-                            color: AppColors.ink300, fontSize: 13, height: 1.4),
-                      ),
-                    ),
-                  ],
+          const SizedBox(height: 6),
+          LayoutBuilder(
+            builder: (context, c) => Stack(
+              children: [
+                Container(
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: AppColors.pinkTint,
+                    borderRadius: BorderRadius.circular(Radii.pill),
+                  ),
                 ),
-              ),
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: progress.clamp(0, 1)),
+                  duration: Motion.base,
+                  curve: Motion.emphasized,
+                  builder: (_, v, _) => Container(
+                    height: 14,
+                    width: c.maxWidth * v,
+                    decoration: BoxDecoration(
+                      gradient: AppGradients.brand,
+                      borderRadius: BorderRadius.circular(Radii.pill),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _ControlBar extends StatelessWidget {
-  const _ControlBar({
-    required this.phase,
-    required this.paused,
-    required this.isTimed,
-    required this.onPause,
-    required this.onSkip,
-    this.onDoneSet,
+class _Summary extends StatelessWidget {
+  const _Summary({
+    required this.routine,
+    required this.score,
+    required this.completed,
+    required this.skipped,
+    required this.onFinish,
   });
+  final WorkoutRoutine routine;
+  final int score;
+  final int completed;
+  final int skipped;
+  final VoidCallback onFinish;
 
-  final _Phase phase;
-  final bool paused;
-  final bool isTimed;
-  final VoidCallback onPause;
-  final VoidCallback onSkip;
-  final VoidCallback? onDoneSet;
+  int get _stars => skipped == 0 ? 3 : (skipped <= 2 ? 2 : 1);
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: Insets.screenH),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (onDoneSet != null) ...[
-            PrimaryButton(
-              label: 'Done Set',
-              onPressed: onDoneSet,
-              icon: Icons.check_rounded,
-            ),
-            const SizedBox(height: Insets.md),
-          ],
+          Container(
+            width: 96,
+            height: 96,
+            decoration: const BoxDecoration(
+                gradient: AppGradients.brand, shape: BoxShape.circle),
+            child: const Icon(Icons.emoji_events_rounded,
+                color: Colors.white, size: 52),
+          ),
+          const SizedBox(height: Insets.lg),
+          Text('Workout complete!',
+              style: Theme.of(context).textTheme.displayMedium),
+          const SizedBox(height: Insets.sm),
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+                3,
+                (i) => Icon(
+                      i < _stars
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
+                      color: AppColors.warning,
+                      size: 40,
+                    )),
+          ),
+          const SizedBox(height: Insets.xl),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              Expanded(
-                child: _IconTextButton(
-                  icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                  label: paused ? 'Resume' : 'Pause',
-                  onTap: onPause,
-                ),
-              ),
-              const SizedBox(width: Insets.md),
-              Expanded(
-                child: _IconTextButton(
-                  icon: Icons.skip_next_rounded,
-                  label: phase == _Phase.rest ? 'Skip Rest' : 'Skip',
-                  onTap: onSkip,
-                ),
-              ),
+              _stat(context, '⭐', '$score', 'XP earned'),
+              _stat(context, '✅', '$completed', 'sets done'),
+              _stat(context, '🔥', '${routine.estKcal}', 'kcal'),
             ],
           ),
+          const SizedBox(height: Insets.xxxl),
+          PrimaryButton(label: 'Finish', onPressed: onFinish),
         ],
       ),
     );
   }
-}
 
-class _IconTextButton extends StatelessWidget {
-  const _IconTextButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          color: AppColors.night2,
-          borderRadius: BorderRadius.circular(Radii.md),
-          border: Border.all(color: AppColors.night3),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: AppColors.ink300, size: 20),
-            const SizedBox(width: Insets.xs),
-            Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.ink300,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Done / Completion screen
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DoneScreen extends StatelessWidget {
-  const _DoneScreen({
-    required this.routine,
-    required this.setsCompleted,
-  });
-
-  final WorkoutRoutine routine;
-  final int setsCompleted;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      backgroundColor: AppColors.night0,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(Insets.screenH),
-          child: Column(
-            children: [
-              const Spacer(),
-              // Trophy icon with glow
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppGradients.brand,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.pink.withValues(alpha: 0.4),
-                      blurRadius: 32,
-                      spreadRadius: 4,
-                    ),
-                  ],
-                ),
-                child: const Icon(Icons.emoji_events_rounded,
-                    color: AppColors.white, size: 52),
-              ),
-              const SizedBox(height: Insets.xxl),
-              Text(
-                'Workout Complete!',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w800,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: Insets.sm),
-              Text(
-                routine.name,
-                style: const TextStyle(
-                  color: AppColors.ink300,
-                  fontSize: 15,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: Insets.xxl),
-              // Summary card
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(Insets.xxl),
-                decoration: BoxDecoration(
-                  color: AppColors.night2,
-                  borderRadius: Radii.cardRadius,
-                  border: Border.all(color: AppColors.night3),
-                ),
-                child: Column(
-                  children: [
-                    _SummaryRow(
-                      icon: Icons.fitness_center_rounded,
-                      label: 'Exercises',
-                      value: '${routine.exerciseCount}',
-                    ),
-                    const SizedBox(height: Insets.lg),
-                    _SummaryRow(
-                      icon: Icons.local_fire_department_rounded,
-                      label: 'Est. Calories',
-                      value: '${routine.estKcal} kcal',
-                      accent: AppColors.calories,
-                    ),
-                    const SizedBox(height: Insets.lg),
-                    _SummaryRow(
-                      icon: Icons.timer_outlined,
-                      label: 'Duration',
-                      value: '~${routine.durationMin} min',
-                      accent: AppColors.blue,
-                    ),
-                    const SizedBox(height: Insets.lg),
-                    _SummaryRow(
-                      icon: Icons.repeat_rounded,
-                      label: 'Sets Done',
-                      value: '$setsCompleted',
-                      accent: AppColors.success,
-                    ),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              PrimaryButton(
-                label: 'Finish',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: Icons.check_circle_outline_rounded,
-              ),
-              const SizedBox(height: Insets.md),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.accent = AppColors.pink,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(Radii.sm),
-          ),
-          child: Icon(icon, color: accent, size: 20),
-        ),
-        const SizedBox(width: Insets.md),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.ink300,
-              fontSize: 14,
-            ),
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            color: AppColors.white,
-            fontWeight: FontWeight.w700,
-            fontSize: 16,
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _stat(BuildContext c, String emoji, String value, String label) =>
+      Column(
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 22)),
+          Text(value, style: Theme.of(c).textTheme.titleLarge),
+          Text(label, style: Theme.of(c).textTheme.labelMedium),
+        ],
+      );
 }
