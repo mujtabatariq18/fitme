@@ -18,7 +18,9 @@ COPY --from=build /app/build/web /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
+# Use 127.0.0.1 (not localhost): nginx listens on IPv4 only, but localhost
+# resolves to ::1 inside the container.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD wget -q --spider http://localhost/ || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:80/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

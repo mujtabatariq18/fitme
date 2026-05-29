@@ -72,19 +72,58 @@ flutter test                # unit + widget tests
 dart run flutter_launcher_icons   # regenerate icons from assets/brand/logo_a.png
 ```
 
-## Status — Phase 1 (Foundation) — done
+## Run locally with Docker
 
-Project scaffold · design system (light + dark) · AI-generated logo + launcher
-icons · onboarding (gender, goal, problem areas, body stats, target, activity,
-diet) with live BMR/TDEE/macro math · plan-ready summary · home dashboard with
-calorie ring · pluggable AI admin panel · routing & local persistence. Compiles
-for web; tests green.
+```bash
+docker compose up -d --build      # serves the web app at http://localhost:8080
+```
+The admin panel is in-app: log in as admin → Settings → AI Settings
+(`http://localhost:8080/#/settings/ai`).
+
+## Run on an Android emulator
+
+The Windows JDK has an AF_UNIX/loopback bug that breaks the local Gradle daemon,
+so the APK is built inside a Linux Flutter container, then installed via adb:
+```bash
+docker run --rm -v "E:/FItMe:/app" -v fitme_gradle:/root/.gradle -w /app \
+  ghcr.io/cirruslabs/flutter:3.44.0 \
+  bash -lc "git config --global --add safe.directory /app && flutter pub get && flutter build apk --debug"
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+```
+> After a container build, run `flutter pub get` on the host once to restore the
+> Windows `.dart_tool` package config (the bind mount leaves Linux paths).
+
+## Accounts (local/offline auth)
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@fitme.app` | `admin123` |
+| Member | `demo@fitme.app` | `demo123` |
+
+Sign-up creates new member accounts. Admins get the AI Settings + User
+Management panels. (Local credential store now; swaps to Supabase auth in the
+backend phase.)
+
+## Status
+
+**Phase 1 — Foundation (done):** scaffold, design system (light+dark), logo +
+launcher icons, onboarding with BMR/TDEE/macro math, dashboard, routing,
+persistence. Live on web.
+
+**Phase 2 — Auth + all modules (done):**
+- Auth: login/signup, role-based routing, seeded admin & member, user management.
+- Meal plan: 72 meals across 6 diets, recipe detail, diet switcher.
+- Workouts: 14 routines / 84 exercises with form cues, area filter, detail view.
+- Food log: 62-food database, serving logging, live ring vs target, scan entry point.
+- Progress: weight chart + logging.
+- AI coach: 40 tips + 12 Q&A, offline answering, live when a provider is bound.
+- Admin AI panel: OpenRouter (+per-vendor) model picker with vision badges &
+  context sizes; vision-only tasks restricted to vision models.
 
 ## Roadmap
 
-- **Phase 2 — Backend & auth:** Supabase init, auth, profile sync, AI keys in edge functions.
-- **Phase 3 — AI food scan:** camera → vision provider → calorie/macro logging against targets.
-- **Phase 4 — Workouts & avatars:** exercise library, gender-aware animated avatar guidance.
-- **Phase 5 — Health sync:** `health` plugin (Apple Health / Google Fit / Samsung), background reads.
-- **Phase 6 — Proactive coaching:** stat monitoring + push notifications (FCM/APNs).
-- **Phase 7 — Progress & body analysis:** weight/measurement charts, progress-photo AI analysis.
+- **Phase 3 — Backend:** Supabase init, real auth, profile/log sync, AI keys in edge functions.
+- **Phase 4 — AI vision live:** camera → bound vision model → calorie/macro + body analysis.
+- **Phase 5 — Avatars:** gender-aware animated exercise guidance + guided workout player.
+- **Phase 6 — Health sync:** `health` plugin (Apple Health / Google Fit / Samsung).
+- **Phase 7 — Proactive coaching:** stat monitoring + push notifications (FCM/APNs).
