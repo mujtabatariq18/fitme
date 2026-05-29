@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../../core/ai/ai_client.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_theme.dart';
@@ -166,11 +169,40 @@ class _ScanCard extends ConsumerWidget {
         ref.watch(aiConfigProvider).providerFor(AiTask.foodVision);
     final ready = provider != null && provider.isConfigured;
     return FitCard(
-      onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ready
-            ? 'Camera capture → ${provider.model} analysis wires up in the AI phase'
-            : 'Add a vision AI provider in Admin → AI Settings to enable photo scanning'),
-      )),
+      onTap: () {
+        if (!ready) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'Add a vision AI provider in Admin → AI Settings to enable scanning')));
+          return;
+        }
+        showModalBottomSheet(
+          context: context,
+          builder: (sheet) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt_rounded),
+                  title: const Text('Take a photo'),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _scan(context, ref, provider, ImageSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_rounded),
+                  title: const Text('Choose from gallery'),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _scan(context, ref, provider, ImageSource.gallery);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
       child: Row(
         children: [
           Container(
@@ -201,6 +233,61 @@ class _ScanCard extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _scan(BuildContext context, WidgetRef ref, provider,
+      ImageSource source) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    var loaderShown = false;
+    try {
+      final picked =
+          await ImagePicker().pickImage(source: source, imageQuality: 70);
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(child: CircularProgressIndicator()),
+        );
+        loaderShown = true;
+      }
+
+      final raw = await ref.read(aiClientProvider).complete(
+            provider: provider,
+            system:
+                'You are a nutrition estimator. Estimate the food and its portion '
+                'from the image. Reply ONLY with compact JSON, no prose.',
+            user:
+                'Identify the meal and estimate totals for the portion shown. '
+                'JSON shape: {"name":string,"kcal":int,"protein":int,"carbs":int,"fat":int}',
+            imageBytes: bytes,
+            imageMime: 'image/jpeg',
+          );
+      if (loaderShown) {
+        navigator.pop(); // close loader
+        loaderShown = false;
+      }
+
+      final jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
+      final m = jsonDecode(jsonStr) as Map<String, dynamic>;
+      ref.read(foodLogProvider.notifier).addCustom(
+            name: (m['name'] ?? 'Scanned meal').toString(),
+            kcal: (m['kcal'] as num?)?.round() ?? 0,
+            protein: (m['protein'] as num?)?.round() ?? 0,
+            carbs: (m['carbs'] as num?)?.round() ?? 0,
+            fat: (m['fat'] as num?)?.round() ?? 0,
+            emoji: '📸',
+          );
+      messenger.showSnackBar(SnackBar(
+          content: Text('Logged: ${m['name']} · ${m['kcal']} kcal')));
+    } catch (e) {
+      if (loaderShown) navigator.pop();
+      messenger.showSnackBar(
+          SnackBar(content: Text('Scan failed: ${e.toString().split('\n').first}')));
+    }
   }
 }
 

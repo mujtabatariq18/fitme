@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/ai/ai_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/fit_card.dart';
 import '../../admin/application/ai_config_controller.dart';
 import '../../admin/domain/ai_provider_config.dart';
 import '../../onboarding/application/profile_controller.dart';
+import '../../onboarding/domain/user_profile.dart';
 import '../data/coach_seed.dart';
 import '../domain/coach_tip.dart';
 
@@ -38,13 +40,46 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
     super.dispose();
   }
 
-  void _send(String text) {
-    if (text.trim().isEmpty) return;
-    setState(() {
-      _messages.add(_Msg(text, fromUser: true));
-      _messages.add(_Msg(_answerFor(text)));
-    });
+  bool _thinking = false;
+
+  Future<void> _send(String text) async {
+    if (text.trim().isEmpty || _thinking) return;
+    setState(() => _messages.add(_Msg(text, fromUser: true)));
     _input.clear();
+    _scrollToEnd();
+
+    final provider = ref.read(aiConfigProvider).providerFor(AiTask.chatCoach);
+    if (provider != null && provider.isConfigured) {
+      setState(() => _thinking = true);
+      try {
+        final reply = await ref.read(aiClientProvider).complete(
+              provider: provider,
+              system: _systemPrompt(),
+              user: text,
+            );
+        setState(() => _messages.add(_Msg(reply.trim())));
+      } catch (_) {
+        // Network/key error → graceful offline fallback.
+        setState(() => _messages.add(_Msg(_answerFor(text))));
+      } finally {
+        setState(() => _thinking = false);
+      }
+    } else {
+      setState(() => _messages.add(_Msg(_answerFor(text))));
+    }
+    _scrollToEnd();
+  }
+
+  String _systemPrompt() {
+    final p = ref.read(profileProvider);
+    final cals = p.dailyCalorieTarget;
+    return 'You are FitMe, an expert, encouraging personal fitness & nutrition '
+        'coach. The user goal is "${p.goal.label}", diet "${p.dietType.label}"'
+        '${cals != null ? ', daily target ~$cals kcal' : ''}. Give concise, '
+        'practical, safe advice in 2-4 sentences. Avoid medical claims.';
+  }
+
+  void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent,
@@ -105,6 +140,15 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
                 ),
                 const SizedBox(height: Insets.lg),
                 ..._messages.map((m) => _Bubble(msg: m)),
+                if (_thinking)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: Insets.sm),
+                      child: Text('Coach is typing…',
+                          style: Theme.of(context).textTheme.labelMedium),
+                    ),
+                  ),
               ],
             ),
           ),

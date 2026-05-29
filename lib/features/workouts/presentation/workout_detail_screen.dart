@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/fit_card.dart';
 import '../../../core/widgets/primary_button.dart';
+import '../../onboarding/application/profile_controller.dart';
+import '../../onboarding/domain/user_profile.dart';
 import '../domain/exercise.dart';
+import 'workout_player_screen.dart';
 
 class WorkoutDetailScreen extends StatelessWidget {
   const WorkoutDetailScreen({super.key, required this.routine});
@@ -57,14 +61,21 @@ class WorkoutDetailScreen extends StatelessWidget {
               for (var i = 0; i < routine.exercises.length; i++)
                 _ExerciseTile(index: i + 1, exercise: routine.exercises[i]),
               const SizedBox(height: Insets.lg),
-              PrimaryButton(
-                label: 'Start workout',
-                icon: Icons.play_arrow_rounded,
-                onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text(
-                          'Guided player with animated avatars — next phase')),
-                ),
+              Consumer(
+                builder: (context, ref, _) {
+                  final isMale =
+                      ref.watch(profileProvider).gender == Gender.male;
+                  return PrimaryButton(
+                    label: 'Start workout',
+                    icon: Icons.play_arrow_rounded,
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => WorkoutPlayerScreen(
+                            routine: routine, isMale: isMale),
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: Insets.xl),
             ]),

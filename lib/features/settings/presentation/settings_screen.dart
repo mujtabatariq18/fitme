@@ -72,7 +72,8 @@ class SettingsScreen extends ConsumerWidget {
               'Connect health data', 'Apple Health · Google Fit',
               () => _soon(context)),
           _tile(context, Icons.notifications_rounded, 'Notifications',
-              'Reminders & coaching nudges', () => _soon(context)),
+              'Reminders & coaching nudges',
+              () => context.push('/settings/reminders')),
           if (auth.isAdmin) ...[
             const SizedBox(height: Insets.lg),
             Text('  ADMIN', style: Theme.of(context).textTheme.labelMedium),

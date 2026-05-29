@@ -7,6 +7,7 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/signup_screen.dart';
 import '../../features/dashboard/presentation/app_shell.dart';
+import '../../features/notifications/presentation/reminders_screen.dart';
 import '../../features/nutrition/presentation/food_log_screen.dart';
 import '../../features/onboarding/application/profile_controller.dart';
 import '../../features/onboarding/presentation/onboarding_flow.dart';
@@ -59,6 +60,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           path: '/admin/users',
           builder: (_, _) => const UserManagementScreen()),
       GoRoute(path: '/food', builder: (_, _) => const FoodLogScreen()),
+      GoRoute(
+          path: '/settings/reminders',
+          builder: (_, _) => const RemindersScreen()),
       GoRoute(path: '/workouts', builder: (_, _) => const WorkoutsScreen()),
       GoRoute(path: '/progress', builder: (_, _) => const ProgressScreen()),
     ],

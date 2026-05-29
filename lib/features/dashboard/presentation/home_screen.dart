@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/blob_background.dart';
 import '../../../core/widgets/fit_card.dart';
 import '../../../core/widgets/metric_ring.dart';
+import '../../health/presentation/health_card.dart';
 import '../../nutrition/application/food_log_controller.dart';
 import '../../onboarding/application/profile_controller.dart';
 import '../../onboarding/domain/user_profile.dart';
@@ -114,6 +115,10 @@ class HomeScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+              const SizedBox(height: Insets.lg),
+
+              // Connected health data
+              const HealthCard(),
               const SizedBox(height: Insets.lg),
 
               // Quick actions
